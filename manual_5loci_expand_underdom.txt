@@ -1,0 +1,690 @@
+initialize() {
+    initializeSLiMModelType("nonWF");
+    defineConstant("K", 50);    // carrying capacity
+    defineConstant("R", 2.5);    // expected number of offspring per first parent
+    defineConstant("M", K / (R - 1));
+    defineConstant("globalFitnessScaler", 100000); // to make soft selection and fecundity selection
+
+    defineConstant("numpops", 250);
+    defineConstant("migRate", 0.25);
+
+    initializeMutationRate(1e-7);
+
+    initializeMutationType("m1", 0.5, "f", 0); // neutral
+    m1.convertToSubstitution = T;  // fitness will be absolute, and here we are keeping fixed effects
+    m1.mutationStackGroup = -1;
+    m1.mutationStackPolicy = "f";  // once it fixes it stays, so the realized mut rate is slightly lower
+
+    initializeMutationType("m2",1000000000, "f", -0.0000000001); // delet underdominant  hs = -0.00001
+    m2.convertToSubstitution = F;  // fitness will be absolute, and here we are keeping fixed effects
+    m2.mutationStackGroup = -1;
+    m2.mutationStackPolicy = "f";
+
+    initializeMutationType("m3",1000000000, "f", -0.0000000001); // delet underdominant  hs = -0.00001
+    m3.convertToSubstitution = F;  // fitness will be absolute, and here we are keeping fixed effects
+    m3.mutationStackGroup = -1;
+    m3.mutationStackPolicy = "f";
+
+    initializeMutationType("m4",1000000000, "f", -0.0000000001); // delet underdominant  hs = -0.00001
+    m4.convertToSubstitution = F;  // fitness will be absolute, and here we are keeping fixed effects
+    m4.mutationStackGroup = -1;
+    m4.mutationStackPolicy = "f";
+
+    initializeMutationType("m5",1000000000, "f", -0.0000000001); // delet underdominant  hs = -0.00001
+    m5.convertToSubstitution = F;  // fitness will be absolute, and here we are keeping fixed effects
+    m5.mutationStackGroup = -1;
+    m5.mutationStackPolicy = "f";
+
+    initializeMutationType("m6",1000000000, "f", -0.0000000001); // delet underdominant  hs = -0.00001
+    m6.convertToSubstitution = F;  // fitness will be absolute, and here we are keeping fixed effects
+    m6.mutationStackGroup = -1;
+    m6.mutationStackPolicy = "f";
+
+    initializeGenomicElementType("g1", c(m1), c(1));
+    initializeGenomicElement(g1, 50, 999999);
+    initializeRecombinationRate(c(1e-8,0.5,1e-8,0.5,1e-8,0.5,1e-8,0.5,1e-8,0.5,1e-8,0.5,1e-8,0.5,1e-8,0.5,1e-8,0.5,1e-8,0.5,1e-8), c(5,6,10,11,15,16,20,21,25,26,30,31,35,36,40,41,45,46,49,50,999999));
+}
+
+
+reproduction() {
+    // trying beverton holt fecundity selection
+    // the number of individuals to make in the whole population for logistic growth with a Beverton-Holt model
+    expected_pop_offspring = subpop.individualCount * (R / (1 + (subpop.individualCount * (R-1)) / K));
+
+    // the sum of fitness of all individuals in the pop, to scale the expected number of offspring for one individual
+    sum_fit = sum(subpop.cachedFitness(NULL));
+    max_fit = max(subpop.cachedFitness(NULL));
+
+    popFitnessScaler = expected_pop_offspring / sum_fit;
+
+    indFitness = subpop.cachedFitness(individual.index);
+    expected_ind_offspring = popFitnessScaler * indFitness;
+    realized_ind_offspring = rpois(1, expected_ind_offspring);
+
+    for ( i in seqLen(realized_ind_offspring))
+    {
+        // find a mate with high enough fitness also
+        //search, and continue in the do loop while fitness is too low, once fitness is high enough, continue to actual mating
+        do
+        {
+            mate = subpop.sampleIndividuals(1);
+        }
+        while (subpop.cachedFitness(mate.index) < rdunif(1, 0, asInteger(max_fit)));  // return to while loop unless fitness is higher than a random draw between 0 and max fit of the pop mate if fitness
+
+        subpop.addCrossed(individual, mate);
+    }
+}
+
+
+// create an initial population of K individuals, the rest empty
+1 early() {
+    inds = sim.subpopulations.individuals;
+    // scale fitness way high for fecundity selection only
+    inds.fitnessScaling = globalFitnessScaler;
+
+    for (i in seqLen(numpops))
+        sim.addSubpop(i, (i == 0) ? 200 else 0);
+
+    // save this run's identifier, used to save and restore
+    defineConstant("simID", getSeed());
+}
+
+early() {
+    inds = sim.subpopulations.individuals;
+
+    // scale fitness way high for fecundity selection only
+//    inds.fitnessScaling = globalFitnessScaler;
+
+    // non-overlapping generations; kill off the parental generation
+    ages = inds.age;
+    inds[ages > 0].fitnessScaling = 0.0;
+
+    // pre-plan migration of individuals to adjacent subpops
+    numMigrants = rbinom(1, inds.size(), migRate);
+
+    if (numMigrants)
+    {
+        migrants = sample(inds, numMigrants);
+        currentSubpopID = migrants.subpopulation.id;
+        displacement = -1 + rbinom(migrants.size(), 1, 0.5) * 2;    // -1 or +1
+        newSubpopID = currentSubpopID + displacement;
+        actuallyMoving = (newSubpopID >= 0) & (newSubpopID < numpops);
+
+        if (sum(actuallyMoving))
+        {
+            migrants = migrants[actuallyMoving];
+            newSubpopID = newSubpopID[actuallyMoving];
+
+            // do the pre-planned moves into each subpop in bulk
+            for (subpop in sim.subpopulations)
+                subpop.takeMigrants(migrants[newSubpopID == subpop.id]);
+        }
+    }
+
+    // post-migration density-dependent selection on each subpop
+    for (subpop in sim.subpopulations)
+    {
+        juvenileCount = sum(subpop.individuals.age == 0);
+        subpop.fitnessScaling = K / juvenileCount;
+    }
+}
+
+
+
+
+50 early() {
+      // save the state of the simulation
+      sim.outputFull("/tmp/slim_" + simID + ".txt");
+
+      // add the underdominant mutation at a range edge population, at generation 5
+      for (i in 0:(numpops-1))
+      {
+          inds = sim.subpopulations[i].individuals;
+      if (size(inds) > 0){
+          // then we are at an non-empty pop before the expanding edge, update it as the edge pop until we reach a pop of 0
+          edge_pop = (i);
+          size_edge_pop = size(sim.subpopulations[i].individuals);
+      }
+      }
+
+      mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if a new mutation (size_edge_pop*2));  // draw all individual genomes at the range edge
+      mutant.addNewDrawnMutation(m2, 3); // add the underdominant mutation at base pair 8
+}
+50:84 late() {
+    if (sim.countOfMutationsOfType(m2) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m2) == 1);
+        if (fixed) {
+              cat(simID + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+    else
+    {
+              cat(simID + ": LOST " + sim.generation + " – RESTARTING\n");
+              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID + ".txt");
+              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      // then we are at an non-empty pop before the expanding edge, update it as the edge pop until we reach a pop of 0
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));  // draw all individua$
+              mutant.addNewDrawnMutation(m2, 3); // add the underdominant mutation at base pair 8
+
+            }
+    }
+}
+
+
+85 early() {
+      // save this run's new seed identifier, used to save and restore
+      defineConstant("simID2", getSeed());
+      // save the state of the simulation
+      sim.outputFull("/tmp/slim_" + simID2 + "_2.txt");
+
+      // add the underdominant mutation at a range edge population, at generation 100
+      for (i in 0:(numpops-1))
+      {
+          inds = sim.subpopulations[i].individuals;
+          if (size(inds) > 0){
+              // then we are at an non-empty pop before the expanding edge, update it as the edge pop until we reach a pop of 0
+              edge_pop = (i);
+              size_edge_pop = size(sim.subpopulations[i].individuals);
+          }
+      }
+      mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if a new mutation (size_edge_pop*2));  // draw all individual genomes at the range edge
+      mutant.addNewDrawnMutation(m3, 18); // add the underdominant mutation at base pair 8
+}
+85:119 late() {
+    if (sim.countOfMutationsOfType(m3) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m3) == 1);
+        if (fixed) {
+              cat(simID2 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID2 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID2 + "_2.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));  // draw all individua$
+              mutant.addNewDrawnMutation(m3, 18); // add the underdominant mutation at base pair 8
+        }
+    }
+    if (sim.countOfMutationsOfType(m2) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m2) == 1);
+        if (fixed) {
+              cat(simID2 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID2 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID2 + "_2.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));  // draw all individua$
+              mutant.addNewDrawnMutation(m2, 3); // add the underdominant mutation at base pair 8
+        }
+    }
+}
+
+
+120 early() {
+      // save this run's new seed identifier, used to save and restore
+      defineConstant("simID3", getSeed());
+      sim.outputFull("/tmp/slim_" + simID3 + "_3.txt");
+
+      for (i in 0:(numpops-1))
+      {
+          inds = sim.subpopulations[i].individuals;
+          if (size(inds) > 0){
+              edge_pop = (i);
+              size_edge_pop = size(sim.subpopulations[i].individuals);
+          }
+      }
+      mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if a new mutation (size_edge_pop*2));  // draw all individual genomes at the range edge
+      mutant.addNewDrawnMutation(m4, 28); // add the underdominant mutation at base pair 8
+}
+120:154 late() {
+    if (sim.countOfMutationsOfType(m4) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m4) == 1);
+        if (fixed) {
+              cat(simID3 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID3 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID3 + "_3.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));
+              mutant.addNewDrawnMutation(m4, 28);
+        }
+    }
+    if (sim.countOfMutationsOfType(m3) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m3) == 1);
+        if (fixed) {
+              cat(simID3 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID3 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID3 + "_3.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));  // draw all individua$
+              mutant.addNewDrawnMutation(m3, 18); // add the underdominant mutation at base pair 8
+        }
+    }
+    if (sim.countOfMutationsOfType(m2) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m2) == 1);
+        if (fixed) {
+              cat(simID3 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID3 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID3 + "_3.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));  // draw all individua$
+              mutant.addNewDrawnMutation(m2, 3); // add the underdominant mutation at base pair 8
+        }
+    }
+}
+
+
+155 early() {
+      // save this run's new seed identifier, used to save and restore
+      defineConstant("simID4", getSeed());
+      sim.outputFull("/tmp/slim_" + simID4 + "_4.txt");
+
+      for (i in 0:(numpops-1))
+      {
+          inds = sim.subpopulations[i].individuals;
+          if (size(inds) > 0){
+              edge_pop = (i);
+              size_edge_pop = size(sim.subpopulations[i].individuals);
+          }
+      }
+      mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if a new mutation (size_edge_pop*2));  // draw all individual genomes at the range edge
+      mutant.addNewDrawnMutation(m5, 38); // add the underdominant mutation at base pair 8
+}
+155:189 late() {
+    if (sim.countOfMutationsOfType(m5) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m5) == 1);
+        if (fixed) {
+              cat(simID4 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID4 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID4 + "_4.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));
+              mutant.addNewDrawnMutation(m5, 38);
+        }
+    }
+    if (sim.countOfMutationsOfType(m4) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m4) == 1);
+        if (fixed) {
+              cat(simID4 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID4 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID4 + "_4.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));
+              mutant.addNewDrawnMutation(m4, 28);
+        }
+    }
+    if (sim.countOfMutationsOfType(m3) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m3) == 1);
+        if (fixed) {
+              cat(simID4 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID4 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID4 + "_4.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));  // draw all individua$
+              mutant.addNewDrawnMutation(m3, 18); // add the underdominant mutation at base pair 8
+        }
+    }
+    if (sim.countOfMutationsOfType(m2) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m2) == 1);
+        if (fixed) {
+              cat(simID4 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID4 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID4 + "_4.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));  // draw all individua$
+              mutant.addNewDrawnMutation(m2, 3); // add the underdominant mutation at base pair 8
+        }
+    }
+}
+
+
+190 early() {
+      // save this run's new seed identifier, used to save and restore
+      defineConstant("simID5", getSeed());
+      sim.outputFull("/tmp/slim_" + simID5 + "_5.txt");
+
+      for (i in 0:(numpops-1))
+      {
+          inds = sim.subpopulations[i].individuals;
+          if (size(inds) > 0){
+              edge_pop = (i);
+              size_edge_pop = size(sim.subpopulations[i].individuals);
+          }
+      }
+      mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if a new mutation (size_edge_pop*2));  // draw all individual genomes at the range edge
+      mutant.addNewDrawnMutation(m6, 48); // add the underdominant mutation at base pair 8
+}
+190:20000 late() {
+    if (sim.countOfMutationsOfType(m6) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m6) == 1);
+        if (fixed) {
+              cat(simID5 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID5 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID5 + "_5.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));
+              mutant.addNewDrawnMutation(m6, 48);
+        }
+    }
+    if (sim.countOfMutationsOfType(m5) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m5) == 1);
+        if (fixed) {
+              cat(simID5 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID5 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID5 + "_5.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));
+              mutant.addNewDrawnMutation(m5, 38);
+        }
+    }
+    if (sim.countOfMutationsOfType(m4) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m4) == 1);
+        if (fixed) {
+              cat(simID5 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID5 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID5 + "_5.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));
+              mutant.addNewDrawnMutation(m4, 28);
+        }
+    }
+    if (sim.countOfMutationsOfType(m3) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m3) == 1);
+        if (fixed) {
+              cat(simID5 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID5 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID5 + "_5.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));  // draw all individua$
+              mutant.addNewDrawnMutation(m3, 18); // add the underdominant mutation at base pair 8
+        }
+    }
+    if (sim.countOfMutationsOfType(m2) == 0)
+    {
+        fixed = (sum(sim.substitutions.mutationType == m2) == 1);
+        if (fixed) {
+              cat(simID5 + ": FIXED " + sim.generation + "\n");
+              sim.simulationFinished();
+        }
+        else
+        {
+              cat(simID5 + ": LOST " + sim.generation + " – RESTARTING\n");              // go back to generation where underdom mut was introduced
+              sim.readFromPopulationFile("/tmp/slim_" + simID5 + "_5.txt");              // start a newly seeded run
+              setSeed(rdunif(1, 0, asInteger(2^62) - 1));
+
+              // re-introduce the underdominant mutation at the range edge
+              for (i in 0:(numpops-1))
+              {
+                  inds = sim.subpopulations[i].individuals;
+                  if (size(inds) > 0){
+                      edge_pop = (i);
+                     size_edge_pop = size(sim.subpopulations[i].individuals);
+                  }
+              }
+              mutant = sample(sim.subpopulations[edge_pop].genomes, 1); // add only one mut as if it was a new mutation (size_edge_pop*2));  // draw all individua$
+              mutant.addNewDrawnMutation(m2, 3); // add the underdominant mutation at base pair 8
+        }
+    }
+}
+
+
+
+early(){
+
+      // get freq of underdominant mut
+      m2muts = sim.mutationsOfType(m2);
+      m2freqs = sim.mutationFrequencies(NULL, m2muts);
+      m3muts = sim.mutationsOfType(m3);
+      m3freqs = sim.mutationFrequencies(NULL, m3muts);
+      m4muts = sim.mutationsOfType(m4);
+      m4freqs = sim.mutationFrequencies(NULL, m4muts);
+      m5muts = sim.mutationsOfType(m5);
+      m5freqs = sim.mutationFrequencies(NULL, m5muts);
+      m6muts = sim.mutationsOfType(m6);
+      m6freqs = sim.mutationFrequencies(NULL, m6muts);
+
+
+      if (sim.generation % 50 == 0)
+      {
+        cat(sim.generation);
+            for (i in 0:(numpops-1))
+            {
+            inds = sim.subpopulations[i].individuals;
+            if (size(m2muts) == 1){
+                        m2freq = sim.mutationFrequencies(sim.subpopulations[i], sim.mutationsOfType(m2));
+            }else{
+                m2freq = NAN;
+            }
+            if (size(m3muts) == 1){
+                    m3freq = sim.mutationFrequencies(sim.subpopulations[i], sim.mutationsOfType(m3));
+            }else{
+                      m3freq = NAN;
+            }
+            if (size(m4muts) == 1){
+                        m4freq = sim.mutationFrequencies(sim.subpopulations[i], sim.mutationsOfType(m4));
+            }else{
+                m4freq = NAN;
+            }
+            if (size(m5muts) == 1){
+                        m5freq = sim.mutationFrequencies(sim.subpopulations[i], sim.mutationsOfType(m5));
+            }else{
+                m5freq = NAN;
+            }
+            if (size(m6muts) == 1){
+                        m6freq = sim.mutationFrequencies(sim.subpopulations[i], sim.mutationsOfType(m6));
+            }else{
+                m6freq = NAN;
+            }
+            cat(",p" + (i+1) + "," + size(inds));
+                    cat("," + m2freq + "," + m3freq + "," + m4freq + "," + m5freq + "," + m6freq);
+            }
+        catn(" ");
+    }
+}
+
+20000 late() {
+    sim.outputFull("FullOut.txt");
+}

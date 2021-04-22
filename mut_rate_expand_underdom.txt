@@ -1,0 +1,170 @@
+initialize() {
+   setSeed(3456789012);
+   initializeSLiMModelType("nonWF");
+   defineConstant("K", 25);    // carrying capacity
+   defineConstant("R", 2.5);    // expected number of offspring per first parent
+   defineConstant("M", K / (R - 1));
+   defineConstant("globalFitnessScaler", 100000); // to make soft selection and fecundity selection
+
+   defineConstant("numpops", 250);
+   defineConstant("migRate", 0.1);
+   defineConstant("filename", "mig0p1_hs0p9_rec1e5_noScale_3");
+
+   initializeMutationRate(5e-7);
+
+   initializeMutationType("m1", 0.5, "f", 0); // neutral
+   m1.convertToSubstitution = T;  // fitness will be absolute, and here we are keeping fixed effects
+   m1.mutationStackGroup = -1;
+   m1.mutationStackPolicy = "f";  // once it fixes it stays, so the realized mut rate is slightly lower
+
+   initializeMutationType("m2",1000000000, "f", -0.0000000001); // delet underdominant  hs = -0.00001
+   m2.convertToSubstitution = F;  // fitness will be absolute, and here we are keeping fixed effects
+   m2.mutationStackGroup = -1;
+   m2.mutationStackPolicy = "f";
+
+   initializeGenomicElementType("g1", c(m1, m2), c(0.1, 0.9));
+   initializeGenomicElement(g1, 0, 99999);
+   initializeRecombinationRate(c(1e-5), c(99999));
+}
+
+reproduction() {
+   // trying beverton holt fecundity selection
+   // the number of individuals to make in the whole population for logistic growth with a Beverton-Holt model
+   expected_pop_offspring = subpop.individualCount * (R / (1 + (subpop.individualCount * (R-1)) / K));
+
+   // the sum of fitness of all individuals in the pop, to scale the expected number of offspring for one individual
+   sum_fit = sum(subpop.cachedFitness(NULL));
+   max_fit = max(subpop.cachedFitness(NULL));
+
+   popFitnessScaler = expected_pop_offspring / sum_fit;
+
+   indFitness = subpop.cachedFitness(individual.index);
+   expected_ind_offspring = popFitnessScaler * indFitness;
+   realized_ind_offspring = rpois(1, expected_ind_offspring);
+
+   for ( i in seqLen(realized_ind_offspring))
+   {
+       // find a mate with high enough fitness also
+       //search, and continue in the do loop while fitness is too low, once fitness is high enough, continue to actual mating
+       do
+       {
+           mate = subpop.sampleIndividuals(1);
+       }
+       while (subpop.cachedFitness(mate.index) < rdunif(1, 0, asInteger(max_fit)));  // return to while loop unless fitness is higher than a random draw between 0 and max fit of the pop mate if fitness
+       subpop.addCrossed(individual, mate);
+   }
+}
+
+// create an initial population of K individuals, the rest empty
+1 early() {
+   for (i in seqLen(numpops))
+       sim.addSubpop(i, (i == 0) ? 200 else 0);
+}
+
+early() {
+   inds = sim.subpopulations.individuals;
+   // scale fitness way high for fecundity selection only
+   //inds.fitnessScaling = globalFitnessScaler;
+
+   // non-overlapping generations; kill off the parental generation
+   ages = inds.age;
+   inds[ages > 0].fitnessScaling = 0.0;
+
+   // pre-plan migration of individuals to adjacent subpops
+   numMigrants = rbinom(1, inds.size(), migRate);
+
+   if (numMigrants)
+   {
+       migrants = sample(inds, numMigrants);
+       currentSubpopID = migrants.subpopulation.id;
+       displacement = -1 + rbinom(migrants.size(), 1, 0.5) * 2;    // -1 or +1
+       newSubpopID = currentSubpopID + displacement;
+       actuallyMoving = (newSubpopID >= 0) & (newSubpopID < numpops);
+       if (sum(actuallyMoving))
+       {
+           migrants = migrants[actuallyMoving];
+           newSubpopID = newSubpopID[actuallyMoving];
+           // do the pre-planned moves into each subpop in bulk
+           for (subpop in sim.subpopulations)
+              subpop.takeMigrants(migrants[newSubpopID == subpop.id]);
+       }
+   }
+
+   // post-migration density-dependent selection on each subpop
+   for (subpop in sim.subpopulations)
+   {
+       juvenileCount = sum(subpop.individuals.age == 0);
+       subpop.fitnessScaling = K / juvenileCount;
+   }
+}
+
+100 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+200 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+300 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+400 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+500 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+600 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+700 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+800 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+900 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+1000 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+
+1100 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+
+1200 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+
+1300 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+
+1400 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+
+1500 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+
+1600 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+
+1700 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+
+1800 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+
+1900 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
+
+2000 late() {
+   sim.outputFull("out_" + filename + "_" + sim.generation + "_rep3.txt");
+}
